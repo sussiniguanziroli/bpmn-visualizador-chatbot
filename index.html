@@ -9,8 +9,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Inter Font -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <!-- bpmn-js library -->
-    <script src="https://unpkg.com/bpmn-js/dist/bpmn-viewer.development.js"></script>
+    <!-- bpmn-js library - Changed to bpmn-navigated-viewer for built-in zoom and pan -->
+    <script src="https://unpkg.com/bpmn-js/dist/bpmn-navigated-viewer.development.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -94,10 +94,12 @@
             }
         });
 
-        // Inicializar el visor BPMN.js
-        const BpmnViewer = window.BpmnJS;
-        const viewer = new BpmnViewer({
+        // Inicializar el visor BPMN.js con new modules for interaction
+        // Using BpmnNavigatedViewer which includes zoom and pan functionality by default.
+        const BpmnNavigatedViewer = window.BpmnJS; // bpmn-navigated-viewer.development.js exports to window.BpmnJS
+        const viewer = new BpmnNavigatedViewer({
             container: '#diagram-viewer',
+            // additionalModules are not needed when using bpmn-navigated-viewer as they are built-in
             keyboard: {
                 bindTo: document
             }
@@ -118,6 +120,14 @@
         let currentElement = null; // El elemento BPMN actualmente activo
         let isChatActive = false;
         let lastHighlightedElementId = null; // Para rastrear el elemento previamente resaltado
+
+        // Simulated database for tracking numbers
+        const simulatedDatabase = {
+            "TRACK123": { status: "En tránsito", location: "Centro de Distribución Bs. As.", found: true },
+            "TRACK456": { status: "Entregado", location: "Domicilio del cliente", found: true },
+            "TRACK789": { status: "Retrasado", location: "Aduana", found: true },
+            "NOTFOUND": { found: false } // A specific entry to simulate not found
+        };
 
         // Función para añadir un mensaje a la interfaz de chat
         function addMessage(sender, text) {
@@ -262,7 +272,14 @@
                     } else if (currentElement.name === 'Consulta') {
                         botMessage += " Por favor, describa su consulta general.";
                         expectsUserInput = true;
-                    } else {
+                    } else if (currentElement.name === 'Base de datos (búsqueda de la encomienda)') {
+                        botMessage = "Realizando búsqueda en la base de datos con el número de seguimiento proporcionado...";
+                        // No user input expected immediately here, it's a processing step
+                        // The result will be handled in handleUserInput after the "search" is "done"
+                        // For a real async operation, you'd show a loading state here and then proceed.
+                        nextElementId = currentElement.outgoing[0]?.target; // Assuming a direct path to the next gateway/task
+                    }
+                    else {
                         // For other tasks, simply proceed automatically
                         nextElementId = currentElement.outgoing[0]?.target;
                     }
@@ -371,6 +388,60 @@
             let nextFlow = null;
             const possibleFlows = currentElement.outgoing;
 
+            // Specific handling for 'Base de datos (búsqueda de la encomienda)'
+            if (currentElement.name === 'Base de datos (búsqueda de la encomienda)') {
+                const trackingNumber = userText.toUpperCase(); // Assume user enters tracking number
+                const result = simulatedDatabase[trackingNumber] || simulatedDatabase["NOTFOUND"];
+
+                if (result.found) {
+                    addMessage('bot', `¡Éxito! Encontré la encomienda. Estado: ${result.status}. Ubicación: ${result.location}.`);
+                    // Find the outgoing flow that leads to the "SI" path (completed) or the gateway asking about status
+                    // Assuming the next element is the gateway "¿Estado del envío completado?"
+                    nextFlow = possibleFlows.find(flow => elements[flow.target]?.name === '¿Estado del envío completado?');
+                } else {
+                    addMessage('bot', `Lo siento, no pude encontrar una encomienda con el número ${userText}.`);
+                    // Find the outgoing flow for "NO" path or an error handling path.
+                    // For now, we'll assume it directly goes to the "NO" branch from the gateway.
+                    // If your BPMN has a direct 'not found' path from the search task,
+                    // you'd need to adjust this to select that specific flow.
+                    nextFlow = possibleFlows.find(flow => elements[flow.target]?.name === '¿Estado del envío completado?'); // Still proceed to the gateway, but the bot's state implies 'no'
+                }
+
+                if (nextFlow) {
+                    currentElement = elements[nextFlow.target];
+                    // If it's the gateway, we'll implicitly provide the answer based on search result.
+                    // This is where the conversational flow might need adjustment if the gateway expects user input.
+                    if (currentElement.name === '¿Estado del envío completado?') {
+                        // Directly proceed through the gateway based on the search result
+                        const gatewayOutflows = currentElement.outgoing;
+                        let gatewayNextFlow = null;
+
+                        if (result.found && result.status === 'Entregado') { // Example condition for "SI"
+                             gatewayNextFlow = gatewayOutflows.find(f => f.name.toLowerCase() === 'si');
+                             addMessage('bot', 'El estado del envío está completado.'); // Bot confirms for user
+                        } else { // Assume "NO" for any other status or not found
+                             gatewayNextFlow = gatewayOutflows.find(f => f.name.toLowerCase() === 'no');
+                             addMessage('bot', 'El estado del envío aún no está completado o no se encontró.'); // Bot confirms for user
+                        }
+
+                        if (gatewayNextFlow) {
+                            currentElement = elements[gatewayNextFlow.target];
+                            await proceedChat();
+                        } else {
+                            addMessage('bot', 'Error: No se encontró un camino válido desde la compuerta de estado del envío.');
+                            endChat();
+                        }
+                    } else {
+                        await proceedChat();
+                    }
+                } else {
+                    addMessage('bot', `Ocurrió un error inesperado después de la búsqueda. Por favor, intente de nuevo.`);
+                    endChat();
+                }
+                return; // Stop further processing in this handleUserInput call
+            }
+
+            // Existing logic for other gateways and tasks
             if (currentElement.type === 'exclusiveGateway' ||
                 currentElement.type === 'inclusiveGateway' ||
                 currentElement.type === 'eventBasedGateway' ||
@@ -379,7 +450,7 @@
                 currentElement.name === 'Solicitud Documentación del usuario' ||
                 currentElement.name === 'Verificación de la documentación (¿Documentación completa?)' ||
                 currentElement.name === '¿Se aprueba el envío?' ||
-                currentElement.name === '¿Estado del envío completado?' ||
+                currentElement.name === '¿Estado del envío completado?' || // This gateway will now be handled internally after search
                 currentElement.name === 'Confirmación de identidad') {
 
                 for (const flow of possibleFlows) {
@@ -493,9 +564,8 @@
                        currentElement.name === 'Seguimiento' ||
                        currentElement.name === 'Envío' ||
                        currentElement.name === 'Validación de identidad' ||
-                       currentElement.name === 'Consulta sobre el envío asociado' ||
-                       currentElement.name === 'Base de datos (búsqueda de la encomienda)'
-                       ) {
+                       currentElement.name === 'Consulta sobre el envío asociado'
+                       ) { // 'Base de datos (búsqueda de la encomienda)' removed from here
                 // For tasks that expect arbitrary text input (like tracking number or general inquiry)
                 addMessage('bot', `Recibido: "${userText}". Procesando...`);
                 // Assume a direct progression after receiving input for these tasks
