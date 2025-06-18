@@ -69,7 +69,462 @@
         </div>
     </div>
 
-    <script src="script.js?v=2" defer></script>
+    <script>
+        // Función de alerta personalizada para mostrar mensajes al usuario
+        function customAlert(title, message) {
+            const modal = document.getElementById('custom-modal');
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex'); // Usar flexbox para centrado
+        }
+
+        // Cerrar modal cuando se hace clic en el botón de cerrar
+        document.getElementById('close-modal-btn').addEventListener('click', () => {
+            document.getElementById('custom-modal').classList.add('hidden');
+            document.getElementById('custom-modal').classList.remove('flex');
+        });
+
+        // Cerrar modal si se hace clic fuera de su contenido
+        window.addEventListener('click', (event) => {
+            const modal = document.getElementById('custom-modal');
+            if (event.target === modal) {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+        });
+
+        // Inicializar el visor BPMN.js
+        const BpmnViewer = window.BpmnJS;
+        const viewer = new BpmnViewer({
+            container: '#diagram-viewer',
+            keyboard: {
+                bindTo: document
+            }
+        });
+
+        const bpmnXmlInput = document.getElementById('bpmn-xml-input');
+        const loadBpmnBtn = document.getElementById('load-bpmn-btn');
+
+        // Elementos de la interfaz de usuario del chatbot
+        const chatMessagesDiv = document.getElementById('chat-messages');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const startChatButton = document.getElementById('start-chat-btn');
+
+        // Variables de estado del chatbot
+        let bpmnProcess = null; // Almacena el proceso principal de BPMN
+        let elements = {}; // Almacena todos los elementos BPMN (tareas, compuertas, eventos, etc.) por su ID
+        let currentElement = null; // El elemento BPMN actualmente activo
+        let isChatActive = false;
+        let lastHighlightedElementId = null; // Para rastrear el elemento previamente resaltado
+
+        // Función para añadir un mensaje a la interfaz de chat
+        function addMessage(sender, text) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            if (sender === 'bot') {
+                messageDiv.classList.add('bot-message');
+            } else {
+                messageDiv.classList.add('user-message');
+            }
+            messageDiv.textContent = text;
+            chatMessagesDiv.appendChild(messageDiv);
+            chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight; // Desplazamiento automático al final
+        }
+
+        // Función para resaltar un elemento BPMN en el visor
+        function highlightElement(elementId) {
+            const canvas = viewer.get('canvas');
+            if (lastHighlightedElementId) {
+                canvas.removeMarker(lastHighlightedElementId, 'highlight');
+            }
+            canvas.addMarker(elementId, 'highlight');
+            lastHighlightedElementId = elementId;
+        }
+
+        // Analizar el XML BPMN para extraer elementos y sus conexiones
+        async function parseBPMN(xml) {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xml, 'text/xml');
+            const bpmnNamespace = 'http://www.omg.org/spec/BPMN/20100524/MODEL';
+
+            // Comprobar errores de análisis de XML
+            const parseError = xmlDoc.querySelector('parsererror');
+            if (parseError) {
+                console.error('Error de DOMParser:', parseError.textContent);
+                customAlert('Error de Análisis BPMN', `Estructura XML inválida detectada: ${parseError.textContent}`);
+                return null;
+            }
+
+            // Obtener el proceso principal (asumiendo un proceso ejecutable principal para el flujo del chatbot)
+            // El archivo BPMN proporcionado tiene un proceso con ID 'Id_b543bcf9-bb89-4954-ba10-fbb923190678'
+            const processes = Array.from(xmlDoc.getElementsByTagNameNS(bpmnNamespace, 'process')); // Convertir a array
+            let mainProcess = null;
+            for (let i = 0; i < processes.length; i++) {
+                if (processes[i].id === 'Id_b543bcf9-bb89-4954-ba10-fbb923190678') { // Dirigirse al ID de proceso específico
+                    mainProcess = processes[i];
+                    break;
+                }
+            }
+
+            if (!mainProcess) {
+                customAlert('Error de Análisis', 'El proceso BPMN especificado (ID: Id_b543bcf9-bb89-4954-ba10-fbb923190678) no se encontró en el XML.');
+                return null;
+            }
+
+            const parsedElements = {};
+            // Recopilar todos los elementos BPMN relevantes
+            const elementTypes = ['startEvent', 'task', 'exclusiveGateway', 'endEvent', 'subProcess', 'intermediateThrowEvent']; // Añadir otros tipos según sea necesario
+            elementTypes.forEach(type => {
+                Array.from(xmlDoc.getElementsByTagNameNS(bpmnNamespace, type)).forEach(el => { // Convertir a array
+                    if (el.id) {
+                        parsedElements[el.id] = {
+                            id: el.id,
+                            name: el.getAttribute('name') || '', // El nombre puede estar vacío para eventos de inicio/fin
+                            type: el.localName,
+                            outgoing: [],
+                            incoming: []
+                        };
+                    }
+                });
+            });
+
+            // Rellenar flujos de entrada/salida para flujos de secuencia
+            Array.from(xmlDoc.getElementsByTagNameNS(bpmnNamespace, 'sequenceFlow')).forEach(flow => { // Convertir a array
+                const sourceRef = flow.getAttribute('sourceRef');
+                const targetRef = flow.getAttribute('targetRef');
+                const flowName = flow.getAttribute('name') || ''; // El nombre del flujo puede usarse para condiciones
+
+                if (parsedElements[sourceRef]) {
+                    parsedElements[sourceRef].outgoing.push({ id: flow.id, target: targetRef, name: flowName });
+                }
+                if (parsedElements[targetRef]) {
+                    parsedElements[targetRef].incoming.push({ id: flow.id, source: sourceRef, name: flowName });
+                }
+            });
+
+            return { process: mainProcess, elements: parsedElements };
+        }
+
+        // Simula el progreso del chatbot a través del diagrama BPMN
+        async function proceedChat(userInputText = '') {
+            if (!currentElement) {
+                customAlert('Error de Chat', 'Proceso de chat no inicializado o completado.');
+                endChat();
+                return;
+            }
+
+            // Resaltar el elemento actual en el diagrama BPMN
+            highlightElement(currentElement.id);
+
+            let botMessage = '';
+            let nextElementId = null;
+            let expectsUserInput = false;
+            let choices = []; // Para compuertas
+
+            switch (currentElement.type) {
+                case 'startEvent':
+                    botMessage = `¡Hola! Soy un chatbot para el seguimiento de encomiendas internacionales. ¿Qué desea realizar?`;
+                    // Asumir que el evento de inicio tiene un flujo de salida a la primera tarea
+                    nextElementId = currentElement.outgoing[0]?.target;
+                    break;
+
+                case 'task':
+                case 'subProcess': // Tratar los subprocesos como tareas por ahora
+                    botMessage = `Estamos en el paso: "${currentElement.name}".`;
+
+                    // Si es una tarea que requiere entrada de usuario
+                    if (currentElement.name === 'Qué quiere realizar el usuario?') {
+                        botMessage += " Por favor, escriba 'seguimiento' para consultas de seguimiento, 'envio' para consultas de envío, o 'consulta' para una consulta general.";
+                        expectsUserInput = true;
+                        choices = ['seguimiento', 'envio', 'consulta'];
+                    } else if (currentElement.name === 'Solicitud número de seguimiento') {
+                        botMessage += " Por favor, proporcione su número de seguimiento.";
+                        expectsUserInput = true;
+                    } else if (currentElement.name === 'Solicitud Documentación del usuario') {
+                        botMessage += " Por favor, confirme si tiene todos los documentos requeridos. Escriba 'sí' o 'no'.";
+                        expectsUserInput = true;
+                        choices = ['sí', 'no'];
+                    } else if (currentElement.name === 'Consulta') {
+                        botMessage += " Por favor, describa su consulta general.";
+                        expectsUserInput = true;
+                    }
+                    else {
+                        // Para otras tareas, simplemente proceder automáticamente
+                        nextElementId = currentElement.outgoing[0]?.target;
+                    }
+                    break;
+
+                case 'exclusiveGateway':
+                    botMessage = `Estamos en una decisión en "${currentElement.name}".`;
+                    expectsUserInput = true;
+                    // Obtener opciones de las transiciones de salida con nombre
+                    choices = currentElement.outgoing.map(flow => flow.name.toLowerCase()).filter(name => name); 
+
+                    if (choices.length > 0) {
+                        botMessage += ` Por favor, elija: ${choices.join(' o ')}.`;
+                    } else {
+                        // Si no hay nombres de flujos, ofrecer opciones genéricas
+                        botMessage += " Por favor, escriba 'sí' o 'no' para continuar.";
+                        choices = ['sí', 'no']; 
+                    }
+                    break;
+
+                case 'intermediateThrowEvent':
+                    botMessage = `Ha ocurrido un evento: "${currentElement.name}".`;
+                    nextElementId = currentElement.outgoing[0]?.target;
+                    break;
+
+                case 'endEvent':
+                    botMessage = `El proceso ha concluido: "${currentElement.name}". ¡Gracias por usar el chatbot!`;
+                    endChat();
+                    return; // Fin del chat inmediatamente después de mostrar el mensaje
+            }
+
+            addMessage('bot', botMessage);
+
+            if (expectsUserInput) {
+                userInput.disabled = false;
+                sendButton.disabled = false;
+            } else if (nextElementId) {
+                // Si no se espera entrada del usuario, proceder automáticamente al siguiente elemento
+                setTimeout(() => {
+                    currentElement = elements[nextElementId];
+                    proceedChat();
+                }, 1000); // Pequeño retraso para facilitar la lectura
+            } else {
+                // No se encontró el siguiente elemento, probablemente un final no manejado o un error en BPMN
+                addMessage('bot', `Parece que hemos llegado a una parte no manejada del proceso o al final del flujo actual. Por favor, intente iniciar un nuevo chat si tiene más preguntas.`);
+                endChat();
+            }
+        }
+
+        // Función para manejar la entrada del usuario
+        async function handleUserInput() {
+            const userText = userInput.value.trim();
+            if (!userText) return;
+
+            addMessage('user', userText);
+            userInput.value = ''; // Limpiar campo de entrada
+
+            userInput.disabled = true;
+            sendButton.disabled = true;
+
+            const userLower = userText.toLowerCase();
+
+            // Lógica para determinar el siguiente paso basándose en el elemento actual y la entrada del usuario
+            if (currentElement.type === 'exclusiveGateway' ||
+                currentElement.name === 'Qué quiere realizar el usuario?' ||
+                currentElement.name === 'Solicitud Documentación del usuario' ||
+                currentElement.name === 'Verificación de la documentación (¿Documentación completa?)' ||
+                currentElement.name === '¿Se aprueba el envío?' ||
+                currentElement.name === '¿Estado del envío completado?' ||
+                currentElement.name === 'Confirmación de identidad') {
+
+                let nextFlow = null;
+                const possibleFlows = currentElement.outgoing;
+
+                for (const flow of possibleFlows) {
+                    const flowNameLower = flow.name.toLowerCase();
+
+                    // Comprobar si la entrada del usuario coincide con el nombre del flujo (condición)
+                    if (userLower.includes(flowNameLower)) {
+                        nextFlow = flow;
+                        break;
+                    }
+
+                    // Manejo específico para "sí"/"no" en flujos sin nombre explícito o con nombres como "SI"/"NO"
+                    if ((userLower === 'sí' || userLower === 'si') && (flowNameLower === 'si' || flowNameLower === 'sí')) {
+                        nextFlow = flow;
+                        break;
+                    }
+                    if (userLower === 'no' && flowNameLower === 'no') {
+                        nextFlow = flow;
+                        break;
+                    }
+
+                    // Para "Qué quiere realizar el usuario?", mapear entradas a nombres de tareas específicos
+                    if (currentElement.name === 'Qué quiere realizar el usuario?') {
+                         if (userLower.includes('seguimiento') && elements[flow.target]?.name === 'Seguimiento') {
+                             nextFlow = flow;
+                             break;
+                         }
+                         if (userLower.includes('envio') && elements[flow.target]?.name === 'Envío') {
+                             nextFlow = flow;
+                             break;
+                         }
+                         if (userLower.includes('consulta') && elements[flow.target]?.name === 'Consulta') {
+                             nextFlow = flow;
+                             break;
+                         }
+                    }
+                    // Para "Solicitud Documentación del usuario?", mapear "sí" o "no" a destinos correctos
+                    if (currentElement.name === 'Solicitud Documentación del usuario') {
+                        if ((userLower.includes('sí') || userLower.includes('si')) && elements[flow.target]?.name === 'Verificación de la documentación (¿Documentación completa?)') {
+                            nextFlow = flow;
+                            break;
+                        }
+                        if (userLower.includes('no') && elements[flow.target]?.name === 'Envío cancelado') {
+                            nextFlow = flow;
+                            break;
+                        }
+                    }
+
+                    // Manejo específico para la compuerta "Verificación de la documentación (¿Documentación completa?)"
+                    // Si el usuario dice 'no', debe volver a 'Solicitud Documentación del usuario'
+                    if (currentElement.name === 'Verificación de la documentación (¿Documentación completa?)') {
+                        if (userLower.includes('no')) {
+                             addMessage('bot', "Documentación incompleta. Por favor, vuelva a enviar los documentos requeridos.");
+                             currentElement = elements['Id_c72c6ce3-757a-4b93-a055-4cc2f27e1caf']; // Volver a la tarea de solicitud
+                             userInput.disabled = false;
+                             sendButton.disabled = false;
+                             return; // Esperar nueva entrada
+                        }
+                    }
+                }
+
+
+                if (nextFlow) {
+                    currentElement = elements[nextFlow.target];
+                    await proceedChat(); // Proceder basado en la elección del usuario
+                } else {
+                    let possibleChoices = [];
+                    if (currentElement.type === 'exclusiveGateway' || 
+                        currentElement.name === 'Verificación de la documentación (¿Documentación completa?)' ||
+                        currentElement.name === '¿Se aprueba el envío?' ||
+                        currentElement.name === '¿Estado del envío completado?' ||
+                        currentElement.name === 'Confirmación de identidad') {
+                        possibleChoices = currentElement.outgoing.map(flow => flow.name.toLowerCase()).filter(name => name);
+                        if (possibleChoices.length === 0) possibleChoices = ['sí', 'no']; // Fallback genérico
+                    } else if (currentElement.name === 'Qué quiere realizar el usuario?') {
+                         possibleChoices = ['seguimiento', 'envio', 'consulta'];
+                    } else if (currentElement.name === 'Solicitud Documentación del usuario') {
+                        possibleChoices = ['sí', 'no'];
+                    }
+
+                    addMessage('bot', `No entendí su elección. Por favor, responda con una de las siguientes opciones: ${possibleChoices.join(', ')}.`);
+                    userInput.disabled = false; // Habilitar entrada de nuevo
+                    sendButton.disabled = false;
+                }
+            } else if (currentElement.name === 'Solicitud número de seguimiento' ||
+                       currentElement.name === 'Consulta' ||
+                       currentElement.name === 'Decisión administrativa' ||
+                       currentElement.name === 'Generación de número de seguimiento' ||
+                       currentElement.name === 'Realizar envío' ||
+                       currentElement.name === 'Seguimiento' ||
+                       currentElement.name === 'Envío' ||
+                       currentElement.name === 'Validación de identidad' ||
+                       currentElement.name === 'Consulta sobre el envío asociado' ||
+                       currentElement.name === 'Base de datos (búsqueda de la encomienda)'
+                       ) {
+                // Para tareas que esperan entrada de texto arbitraria (como número de seguimiento o consulta general)
+                addMessage('bot', `Recibido: "${userText}". Procesando...`);
+                // Asumir una progresión directa después de recibir la entrada para estas tareas
+                const nextFlow = currentElement.outgoing[0];
+                if (nextFlow) {
+                    currentElement = elements[nextFlow.target];
+                    await proceedChat();
+                } else {
+                    addMessage('bot', `Ocurrió un error inesperado. Por favor, intente de nuevo.`);
+                    endChat();
+                }
+            } else {
+                addMessage('bot', `Lo siento, no puedo procesar esa entrada en esta etapa. Por favor, reinicie el chat.`);
+                endChat();
+            }
+        }
+
+        // Cargar el diagrama BPMN cuando se hace clic en el botón
+        loadBpmnBtn.addEventListener('click', async () => {
+            const xml = bpmnXmlInput.value;
+            if (!xml) {
+                customAlert('Error', 'Por favor, pegue el XML de BPMN en el área de texto primero.');
+                return;
+            }
+
+            try {
+                await viewer.importXML(xml);
+                viewer.get('canvas').zoom('fit-viewport');
+                customAlert('Éxito', '¡Diagrama BPMN cargado correctamente!');
+
+                // Analizar BPMN para la lógica del chatbot
+                const parsedResult = await parseBPMN(xml);
+                if (parsedResult) {
+                    bpmnProcess = parsedResult.process;
+                    elements = parsedResult.elements;
+                    // Opcionalmente, puede encontrar y resaltar el evento de inicio después de la carga
+                    const startEvent = Object.values(elements).find(el => el.type === 'startEvent');
+                    if (startEvent) {
+                        currentElement = startEvent; // Establecer el elemento actual inicial para el visualizador
+                        highlightElement(currentElement.id);
+                    }
+                } else {
+                    bpmnProcess = null;
+                    elements = {};
+                    currentElement = null;
+                }
+            } catch (err) {
+                customAlert('Error', `No se pudo importar el diagrama BPMN: ${err.message}`);
+                bpmnProcess = null;
+                elements = {};
+                currentElement = null;
+            }
+        });
+
+        // Manejador del botón Iniciar Chat
+        startChatButton.addEventListener('click', async () => {
+            chatMessagesDiv.innerHTML = ''; // Limpiar chat anterior
+            isChatActive = true;
+            startChatButton.disabled = true;
+            userInput.disabled = true; // Deshabilitar hasta que el bot lo solicite
+            sendButton.disabled = true;
+
+            if (!bpmnProcess || Object.keys(elements).length === 0) {
+                customAlert('Error', 'Por favor, cargue un diagrama BPMN primero haciendo clic en "Cargar Diagrama BPMN".');
+                endChat();
+                return;
+            }
+
+            // Encontrar el evento de inicio para comenzar el chat
+            const startEvent = Object.values(elements).find(el => el.type === 'startEvent');
+            if (startEvent) {
+                currentElement = startEvent;
+                await proceedChat();
+            } else {
+                customAlert('Error', 'No se encontró ningún evento de inicio en el diagrama BPMN cargado. No se puede iniciar el chat.');
+                endChat();
+            }
+        });
+
+        // Manejador del botón Enviar y la tecla Enter
+        sendButton.addEventListener('click', handleUserInput);
+        userInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter' && !userInput.disabled) {
+                handleUserInput();
+            }
+        });
+
+        // Finalizar el chat de forma elegante
+        function endChat() {
+            isChatActive = false;
+            userInput.disabled = true;
+            sendButton.disabled = true;
+            startChatButton.disabled = false;
+            currentElement = null;
+            // Limpiar el resaltado cuando termina el chat
+            if (lastHighlightedElementId) {
+                viewer.get('canvas').removeMarker(lastHighlightedElementId, 'highlight');
+                lastHighlightedElementId = null;
+            }
+            addMessage('bot', "Sesión de chat finalizada. Haga clic en 'Iniciar Chat' para comenzar una nueva conversación.");
+        }
+
+        // Cargar automáticamente el diagrama BPMN predeterminado al cargar la página si descomenta esto
+        // document.addEventListener('DOMContentLoaded', () => {
+        //     loadBpmnBtn.click();
+        // });
+    </script>
 </body>
 
 </html>
