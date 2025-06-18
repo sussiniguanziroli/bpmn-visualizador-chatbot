@@ -63,11 +63,6 @@ function highlightElement(elementId) {
     lastHighlightedElementId = elementId;
 }
 
-function getRandomElement(arr) {
-    if (!arr || arr.length === 0) return null;
-    return arr[Math.floor(Math.random() * arr.length)];
-}
-
 async function parseBPMN(xml) {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xml, 'text/xml');
@@ -96,10 +91,7 @@ async function parseBPMN(xml) {
 
     const parsedElements = {};
 
-    const elementTypes = [
-        'startEvent', 'task', 'exclusiveGateway', 'endEvent', 'subProcess',
-        'intermediateThrowEvent', 'parallelGateway', 'inclusiveGateway', 'eventBasedGateway'
-    ]; 
+    const elementTypes = ['startEvent', 'task', 'exclusiveGateway', 'endEvent', 'subProcess', 'intermediateThrowEvent']; 
     elementTypes.forEach(type => {
         Array.from(xmlDoc.getElementsByTagNameNS(bpmnNamespace, type)).forEach(el => { 
             if (el.id) {
@@ -147,79 +139,47 @@ async function proceedChat(userInputText = '') {
     switch (currentElement.type) {
         case 'startEvent':
             botMessage = `¡Hola! Soy un chatbot para el seguimiento de encomiendas internacionales. ¿Qué desea realizar?`;
+
             nextElementId = currentElement.outgoing[0]?.target;
             break;
 
         case 'task':
-        case 'subProcess':
+        case 'subProcess': 
             botMessage = `Estamos en el paso: "${currentElement.name}".`;
 
-            if (currentElement.outgoing.length > 1 || (currentElement.name && currentElement.name.includes('?'))) {
-
-                botMessage += ` Por favor, responda lo que se le solicita o elija una opción si se le presenta.`;
+            if (currentElement.name === 'Qué quiere realizar el usuario?') {
+                botMessage += " Por favor, escriba 'seguimiento' para consultas de seguimiento, 'envio' para consultas de envío, o 'consulta' para una consulta general.";
                 expectsUserInput = true;
-                choices = currentElement.outgoing.map(flow => flow.name.toLowerCase()).filter(name => name);
-                if (choices.length === 0) choices = ['sí', 'no']; 
-            } else if (currentElement.outgoing.length > 0) {
+                choices = ['seguimiento', 'envio', 'consulta'];
+            } else if (currentElement.name === 'Solicitud número de seguimiento') {
+                botMessage += " Por favor, proporcione su número de seguimiento.";
+                expectsUserInput = true;
+            } else if (currentElement.name === 'Solicitud Documentación del usuario') {
+                botMessage += " Por favor, confirme si tiene todos los documentos requeridos. Escriba 'sí' o 'no'.";
+                expectsUserInput = true;
+                choices = ['sí', 'no'];
+            } else if (currentElement.name === 'Consulta') {
+                botMessage += " Por favor, describa su consulta general.";
+                expectsUserInput = true;
+            }
+            else {
+
                 nextElementId = currentElement.outgoing[0]?.target;
-            } else {
-                botMessage += ` Parece que esta tarea no tiene una continuación definida.`;
-                endChat();
-                return;
             }
             break;
 
         case 'exclusiveGateway':
             botMessage = `Estamos en una decisión en "${currentElement.name}".`;
             expectsUserInput = true;
+
             choices = currentElement.outgoing.map(flow => flow.name.toLowerCase()).filter(name => name);
+
             if (choices.length > 0) {
                 botMessage += ` Por favor, elija: ${choices.join(' o ')}.`;
             } else {
+
                 botMessage += " Por favor, escriba 'sí' o 'no' para continuar.";
                 choices = ['sí', 'no'];
-            }
-            break;
-
-        case 'parallelGateway': 
-            botMessage = `Hemos llegado a una compuerta paralela "${currentElement.name}". Esto significa que múltiples actividades pueden ocurrir simultáneamente.`;
-
-            const randomParallelFlow = getRandomElement(currentElement.outgoing);
-            if (randomParallelFlow) {
-                addMessage('bot', `Simulando una de las ramas paralelas: "${elements[randomParallelFlow.target].name}".`);
-                nextElementId = randomParallelFlow.target;
-            } else {
-                botMessage += ` No se encontraron ramas de salida para la compuerta paralela.`;
-                endChat();
-                return;
-            }
-            break;
-
-        case 'inclusiveGateway': 
-            botMessage = `Hemos llegado a una compuerta inclusiva "${currentElement.name}". Esto permite una o varias rutas.`;
-
-            const randomInclusiveFlow = getRandomElement(currentElement.outgoing);
-            if (randomInclusiveFlow) {
-                addMessage('bot', `Eligiendo aleatoriamente una de las rutas posibles: "${elements[randomInclusiveFlow.target].name}".`);
-                nextElementId = randomInclusiveFlow.target;
-            } else {
-                botMessage += ` No se encontraron rutas de salida para la compuerta inclusiva.`;
-                endChat();
-                return;
-            }
-            break;
-
-        case 'eventBasedGateway': 
-            botMessage = `Hemos llegado a una compuerta basada en eventos "${currentElement.name}". Estamos esperando uno de varios eventos.`;
-
-            const randomEventFlow = getRandomElement(currentElement.outgoing);
-            if (randomEventFlow) {
-                addMessage('bot', `Simulando que el evento "${elements[randomEventFlow.target].name}" ha ocurrido.`);
-                nextElementId = randomEventFlow.target;
-            } else {
-                botMessage += ` No se encontraron eventos de salida para la compuerta basada en eventos.`;
-                endChat();
-                return;
             }
             break;
 
@@ -231,7 +191,7 @@ async function proceedChat(userInputText = '') {
         case 'endEvent':
             botMessage = `El proceso ha concluido: "${currentElement.name}". ¡Gracias por usar el chatbot!`;
             endChat();
-            return;
+            return; 
     }
 
     addMessage('bot', botMessage);
@@ -240,11 +200,13 @@ async function proceedChat(userInputText = '') {
         userInput.disabled = false;
         sendButton.disabled = false;
     } else if (nextElementId) {
+
         setTimeout(() => {
             currentElement = elements[nextElementId];
             proceedChat();
-        }, 1000);
+        }, 1000); 
     } else {
+
         addMessage('bot', `Parece que hemos llegado a una parte no manejada del proceso o al final del flujo actual. Por favor, intente iniciar un nuevo chat si tiene más preguntas.`);
         endChat();
     }
@@ -262,42 +224,32 @@ async function handleUserInput() {
 
     const userLower = userText.toLowerCase();
 
-    let nextFlow = null;
-    const possibleFlows = currentElement.outgoing;
-
     if (currentElement.type === 'exclusiveGateway' ||
-        (currentElement.type === 'task' && (currentElement.outgoing.length > 1 || (currentElement.name && currentElement.name.includes('?')))) ||
-        currentElement.type === 'subProcess') { 
+        currentElement.name === 'Qué quiere realizar el usuario?' ||
+        currentElement.name === 'Solicitud Documentación del usuario' ||
+        currentElement.name === 'Verificación de la documentación (¿Documentación completa?)' ||
+        currentElement.name === '¿Se aprueba el envío?' ||
+        currentElement.name === '¿Estado del envío completado?' ||
+        currentElement.name === 'Confirmación de identidad') {
+
+        let nextFlow = null;
+        const possibleFlows = currentElement.outgoing;
 
         for (const flow of possibleFlows) {
             const flowNameLower = flow.name.toLowerCase();
 
-            if (flowNameLower && userLower.includes(flowNameLower)) {
+            if (userLower.includes(flowNameLower)) {
                 nextFlow = flow;
                 break;
             }
 
-            if ((userLower === 'sí' || userLower === 'si')) {
-                if (flowNameLower === 'si' || flowNameLower === 'sí') { 
-                    nextFlow = flow;
-                    break;
-                }
-
-                if (currentElement.outgoing.length > 0 && !flowNameLower && currentElement.outgoing.indexOf(flow) === 0) {
-                    nextFlow = flow;
-                    break;
-                }
+            if ((userLower === 'sí' || userLower === 'si') && (flowNameLower === 'si' || flowNameLower === 'sí')) {
+                nextFlow = flow;
+                break;
             }
-            if (userLower === 'no') {
-                if (flowNameLower === 'no') { 
-                    nextFlow = flow;
-                    break;
-                }
-
-                if (currentElement.outgoing.length > 1 && !flowNameLower && currentElement.outgoing.indexOf(flow) === 1) {
-                    nextFlow = flow;
-                    break;
-                }
+            if (userLower === 'no' && flowNameLower === 'no') {
+                nextFlow = flow;
+                break;
             }
 
             if (currentElement.name === 'Qué quiere realizar el usuario?') {
@@ -328,49 +280,62 @@ async function handleUserInput() {
 
             if (currentElement.name === 'Verificación de la documentación (¿Documentación completa?)') {
                 if (userLower.includes('no')) {
-                        addMessage('bot', "Documentación incompleta. Por favor, vuelva a enviar los documentos requeridos.");
-                        currentElement = elements['Id_c72c6ce3-757a-4b93-a055-4cc2f27e1caf']; 
-                        userInput.disabled = false;
-                        sendButton.disabled = false;
-                        return; 
+                    addMessage('bot', "Documentación incompleta. Por favor, vuelva a enviar los documentos requeridos.");
+                    currentElement = elements['Id_c72c6ce3-757a-4b93-a055-4cc2f27e1caf']; 
+                    userInput.disabled = false;
+                    sendButton.disabled = false;
+                    return; 
                 }
             }
         }
 
         if (nextFlow) {
             currentElement = elements[nextFlow.target];
-            await proceedChat();
-        } else {
-            let possibleChoices = currentElement.outgoing.map(flow => flow.name.toLowerCase()).filter(name => name);
-            if (possibleChoices.length === 0) possibleChoices = ['sí', 'no']; 
-
-            addMessage('bot', `No entendí su elección. Por favor, responda con una de las siguientes opciones: ${possibleChoices.join(', ')}.`);
-            userInput.disabled = false;
-            sendButton.disabled = false;
-        }
-    } else {
-
-        if (currentElement.type === 'parallelGateway' ||
-            currentElement.type === 'inclusiveGateway' ||
-            currentElement.type === 'eventBasedGateway' ||
-            currentElement.name === 'Solicitud número de seguimiento' ||
-            currentElement.name === 'Consulta' ||
-            currentElement.name === 'Decisión administrativa' ||
-            currentElement.name === 'Generación de número de seguimiento' ||
-            currentElement.name === 'Realizar envío' ||
-            currentElement.name === 'Seguimiento' ||
-            currentElement.name === 'Envío' ||
-            currentElement.name === 'Validación de identidad' ||
-            currentElement.name === 'Consulta sobre el envío asociado' ||
-            currentElement.name === 'Base de datos (búsqueda de la encomienda)') {
-
-            addMessage('bot', `Recibido: "${userText}". Procesando...`);
-
             await proceedChat(); 
         } else {
-            addMessage('bot', `Lo siento, no puedo procesar esa entrada en esta etapa. Por favor, reinicie el chat.`);
+            let possibleChoices = [];
+            if (currentElement.type === 'exclusiveGateway' ||
+                currentElement.name === 'Verificación de la documentación (¿Documentación completa?)' ||
+                currentElement.name === '¿Se aprueba el envío?' ||
+                currentElement.name === '¿Estado del envío completado?' ||
+                currentElement.name === 'Confirmación de identidad') {
+                possibleChoices = currentElement.outgoing.map(flow => flow.name.toLowerCase()).filter(name => name);
+                if (possibleChoices.length === 0) possibleChoices = ['sí', 'no']; 
+            } else if (currentElement.name === 'Qué quiere realizar el usuario?') {
+                possibleChoices = ['seguimiento', 'envio', 'consulta'];
+            } else if (currentElement.name === 'Solicitud Documentación del usuario') {
+                possibleChoices = ['sí', 'no'];
+            }
+
+            addMessage('bot', `No entendí su elección. Por favor, responda con una de las siguientes opciones: ${possibleChoices.join(', ')}.`);
+            userInput.disabled = false; 
+            sendButton.disabled = false;
+        }
+    } else if (currentElement.name === 'Solicitud número de seguimiento' ||
+        currentElement.name === 'Consulta' ||
+        currentElement.name === 'Decisión administrativa' ||
+        currentElement.name === 'Generación de número de seguimiento' ||
+        currentElement.name === 'Realizar envío' ||
+        currentElement.name === 'Seguimiento' ||
+        currentElement.name === 'Envío' ||
+        currentElement.name === 'Validación de identidad' ||
+        currentElement.name === 'Consulta sobre el envío asociado' ||
+        currentElement.name === 'Base de datos (búsqueda de la encomienda)'
+    ) {
+
+        addMessage('bot', `Recibido: "${userText}". Procesando...`);
+
+        const nextFlow = currentElement.outgoing[0];
+        if (nextFlow) {
+            currentElement = elements[nextFlow.target];
+            await proceedChat();
+        } else {
+            addMessage('bot', `Ocurrió un error inesperado. Por favor, intente de nuevo.`);
             endChat();
         }
+    } else {
+        addMessage('bot', `Lo siento, no puedo procesar esa entrada en esta etapa. Por favor, reinicie el chat.`);
+        endChat();
     }
 }
 
@@ -390,9 +355,10 @@ loadBpmnBtn.addEventListener('click', async () => {
         if (parsedResult) {
             bpmnProcess = parsedResult.process;
             elements = parsedResult.elements;
+
             const startEvent = Object.values(elements).find(el => el.type === 'startEvent');
             if (startEvent) {
-                currentElement = startEvent;
+                currentElement = startEvent; 
                 highlightElement(currentElement.id);
             }
         } else {
@@ -412,7 +378,7 @@ startChatButton.addEventListener('click', async () => {
     chatMessagesDiv.innerHTML = ''; 
     isChatActive = true;
     startChatButton.disabled = true;
-    userInput.disabled = true;
+    userInput.disabled = true; 
     sendButton.disabled = true;
 
     if (!bpmnProcess || Object.keys(elements).length === 0) {
@@ -444,10 +410,10 @@ function endChat() {
     sendButton.disabled = true;
     startChatButton.disabled = false;
     currentElement = null;
+
     if (lastHighlightedElementId) {
         viewer.get('canvas').removeMarker(lastHighlightedElementId, 'highlight');
         lastHighlightedElementId = null;
     }
     addMessage('bot', "Sesión de chat finalizada. Haga clic en 'Iniciar Chat' para comenzar una nueva conversación.");
 }
-
