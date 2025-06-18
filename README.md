@@ -1,6 +1,6 @@
-# Chatbot y Visualizador BPMN
+# 🤖 Chatbot y Visualizador BPMN
 
-Este proyecto es una aplicación web simple que permite visualizar diagramas BPMN y, al mismo tiempo, interactuar con un chatbot que simula un flujo conversacional basado en la lógica definida en el diagrama BPMN.
+Este proyecto es una aplicación web simple que permite **visualizar diagramas BPMN** e **interactuar con un chatbot** que simula un flujo conversacional basado en la lógica definida en el diagrama BPMN.
 
 ---
 
@@ -8,43 +8,43 @@ Este proyecto es una aplicación web simple que permite visualizar diagramas BPM
 
 El proyecto está estructurado en tres archivos principales:
 
-- `index.html`: Define la estructura de la página web, incluyendo el visor BPMN y la interfaz del chatbot.
-- `style.css`: Contiene los estilos CSS personalizados para la aplicación, complementando las clases de Tailwind CSS.
-- `script.js`: Maneja la lógica de la aplicación, incluyendo la carga y visualización de diagramas BPMN, el análisis del XML BPMN y la interacción del chatbot.
+- `index.html`: Estructura de la página web, incluyendo el visor BPMN y la interfaz del chatbot.
+- `style.css`: Estilos personalizados para la aplicación, complementando Tailwind CSS.
+- `script.js`: Lógica principal, incluyendo la carga del diagrama BPMN, análisis del XML y el flujo del chatbot.
 
 ---
 
 ## 🚀 Cómo Usar
 
-### 1. Guardar los archivos
+### 1. Guardar los Archivos
 
-1. Cree una carpeta local (por ejemplo: `bpmn-chatbot`).
-2. Guarde:
-   - El contenido del archivo HTML en `index.html`.
-   - El CSS en `style.css`.
-   - El JavaScript en `script.js`.
+1. Cree una carpeta local, por ejemplo: `bpmn-chatbot`.
+2. Guarde los archivos con los siguientes nombres dentro de esa carpeta:
+   - `index.html`
+   - `style.css`
+   - `script.js`
 
-### 2. Abrir la aplicación
+### 2. Abrir la Aplicación
 
-Abra el archivo `index.html` en su navegador preferido.
+- Abra el archivo `index.html` en su navegador preferido.
 
-### 3. Cargar su diagrama BPMN
+### 3. Cargar un Diagrama BPMN
 
-1. En la sección "Visualizador de Diagramas BPMN", pegue el contenido XML de su diagrama BPMN (por ejemplo: **Seguimiento de encomiendas internacionales**).
-2. Haga clic en **"Cargar Diagrama BPMN"**.
-3. El diagrama se renderizará en el visor.
+1. En la sección "Visualizador de Diagramas BPMN", pegue el contenido XML de su diagrama (por ejemplo, **Seguimiento de encomiendas internacionales**).
+2. Haga clic en el botón **"Cargar Diagrama BPMN"**.
+3. El diagrama se renderizará en pantalla.
 
 ### 4. Iniciar el Chatbot
 
-1. Haga clic en el botón **"Iniciar Chat"**.
-2. El chatbot comenzará a guiarlo a través del flujo definido en el diagrama.
-3. El elemento BPMN activo será resaltado visualmente.
+- Haga clic en **"Iniciar Chat"**.
+- El chatbot iniciará la conversación resaltando el nodo de inicio del diagrama BPMN.
 
 ### 5. Interactuar con el Chatbot
 
-- Escriba respuestas en el campo de entrada y presione **"Enviar"** o **Enter**.
-- Las respuestas se basan directamente en los **nombres de tareas y flujos** de su diagrama BPMN.
-- Si una compuerta tiene salidas como "SI" o "NO", el chatbot espera esas respuestas exactamente.
+- Escriba sus respuestas en el campo de entrada y presione **"Enviar"** o **Enter**.
+- El chatbot seguirá el flujo definido por el diagrama.
+- Si una compuerta tiene flujos con nombres como `"SI"` o `"NO"`, debe responder exactamente con esos nombres.
+- El elemento activo se resaltará en el diagrama para mostrar el progreso.
 
 ---
 
@@ -52,33 +52,38 @@ Abra el archivo `index.html` en su navegador preferido.
 
 ### ✅ Compatibilidad BPMN Mejorada
 
-- El chatbot maneja decisiones en compuertas exclusivas (`exclusive gateways`) comparando nombres de flujos salientes.
-- También responde a tareas que implícitamente esperan una respuesta (por ejemplo, si el nombre es una pregunta o hay múltiples salidas sin nombre).
+- Manejo de compuertas exclusivas (`exclusive gateways`) mediante coincidencia de nombres de flujos.
+- Soporte para tareas que implican decisión si:
+  - El nombre de la tarea es una pregunta.
+  - La tarea tiene múltiples flujos salientes sin nombres.
 
-### 🔤 Interacción Genérica
+### 🔀 Manejo de Compuertas Avanzadas (con Randomización)
 
-- Las respuestas del chatbot son **genéricas** y se basan en los nombres del diagrama.
-- Asegúrese de usar **nombres descriptivos** en los elementos BPMN.
+| Tipo de Compuerta | Comportamiento |
+|-------------------|----------------|
+| **XOR (exclusiva)** | Se compara la entrada del usuario con los nombres de flujos salientes. Si no coincide, se elige una ruta aleatoriamente. |
+| **AND (paralela)** | Se notifica una bifurcación paralela. Para simularla linealmente, se elige una rama aleatoria. Las otras se asumen como "en segundo plano". |
+| **OR (inclusiva)** | Se indica que hay múltiples opciones posibles. Se selecciona aleatoriamente una para continuar. |
+| **Basada en eventos** | El chatbot espera un evento, luego selecciona una salida aleatoria para simular su ocurrencia. |
 
----
+- ⚖️ La **randomización 50/50** asegura que siempre se avanza en el flujo, incluso sin entrada del usuario.
 
-## ⚠️ Limitaciones Actuales
+### 🧠 Interacción Genérica
 
-Actualmente, el chatbot **NO soporta**:
-
-- Compuertas **paralelas (AND)**, **inclusivas (OR)**, o **basadas en eventos**.
-- Eventos intermedios complejos (excepto de lanzamiento simple).
-- Ciclos, subprocesos complejos o bucles anidados.
-- Flujos de mensajes entre **participantes** que alteren la lógica secuencial directa.
-
----
-
-## 🌐 Idioma
-
-- Toda la interfaz y las interacciones están diseñadas en **español**.
+- Las respuestas del chatbot se basan únicamente en los **nombres** de los elementos del diagrama.
+- Se recomienda utilizar **nombres descriptivos** para una mejor experiencia.
 
 ---
 
-## 📄 Licencia
+## 🚫 Limitaciones Actuales
 
-Este proyecto puede adaptarse y reutilizarse libremente con atribución.  
+- No hay ejecución real paralela de múltiples ramas en el chat.
+- No se maneja la **fusión** de ramas paralelas o inclusivas (Join gateways).
+- No se soportan:
+  - **Bucles complejos**.
+  - **Compensaciones de procesos**.
+  - **Eventos intermedios complejos**.
+- Los flujos de mensajes entre participantes son solo visuales; no se ejecuta lógica entre pools.
+
+---
+
