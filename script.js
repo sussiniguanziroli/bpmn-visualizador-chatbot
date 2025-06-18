@@ -1,3 +1,5 @@
+document.addEventListener('DOMContentLoaded', () => {
+console.log("Script cargado correctamente")
 // Función de alerta personalizada para mostrar mensajes al usuario
 function customAlert(title, message) {
     const modal = document.getElementById('custom-modal');
@@ -484,7 +486,4 @@ function endChat() {
     addMessage('bot', "Sesión de chat finalizada. Haga clic en 'Iniciar Chat' para comenzar una nueva conversación.");
 }
 
-// Cargar automáticamente el diagrama BPMN predeterminado al cargar la página si descomenta esto
-// document.addEventListener('DOMContentLoaded', () => {
-//     loadBpmnBtn.click();
-// });
+});
