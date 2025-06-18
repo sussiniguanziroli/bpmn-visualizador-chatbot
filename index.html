@@ -172,27 +172,41 @@
             }
 
             const parsedElements = {};
-            // Recopilar todos los elementos BPMN relevantes
-            const elementTypes = ['startEvent', 'task', 'exclusiveGateway', 'endEvent', 'subProcess', 'intermediateThrowEvent']; // Añadir otros tipos según sea necesario
+            // Recopilar todos los elementos BPMN relevantes, incluyendo nuevos tipos de compuertas y eventos de captura
+            const elementTypes = [
+                'startEvent', 'task', 'exclusiveGateway', 'parallelGateway', 'inclusiveGateway',
+                'eventBasedGateway', 'intermediateCatchEvent', 'endEvent', 'subProcess', 'intermediateThrowEvent'
+            ];
             elementTypes.forEach(type => {
-                Array.from(xmlDoc.getElementsByTagNameNS(bpmnNamespace, type)).forEach(el => { // Convertir a array
+                Array.from(xmlDoc.getElementsByTagNameNS(bpmnNamespace, type)).forEach(el => {
                     if (el.id) {
-                        parsedElements[el.id] = {
+                        const elementData = {
                             id: el.id,
-                            name: el.getAttribute('name') || '', // El nombre puede estar vacío para eventos de inicio/fin
+                            name: el.getAttribute('name') || '',
                             type: el.localName,
                             outgoing: [],
                             incoming: []
                         };
+
+                        // For event-based gateways, extract the types of events they are waiting for
+                        if (type === 'eventBasedGateway') {
+                            elementData.events = [];
+                            Array.from(el.children).forEach(child => {
+                                if (child.localName.endsWith('EventDefinition')) {
+                                    elementData.events.push(child.localName.replace('EventDefinition', ''));
+                                }
+                            });
+                        }
+                        parsedElements[el.id] = elementData;
                     }
                 });
             });
 
             // Rellenar flujos de entrada/salida para flujos de secuencia
-            Array.from(xmlDoc.getElementsByTagNameNS(bpmnNamespace, 'sequenceFlow')).forEach(flow => { // Convertir a array
+            Array.from(xmlDoc.getElementsByTagNameNS(bpmnNamespace, 'sequenceFlow')).forEach(flow => {
                 const sourceRef = flow.getAttribute('sourceRef');
                 const targetRef = flow.getAttribute('targetRef');
-                const flowName = flow.getAttribute('name') || ''; // El nombre del flujo puede usarse para condiciones
+                const flowName = flow.getAttribute('name') || ''; // The flow name can be used for conditions
 
                 if (parsedElements[sourceRef]) {
                     parsedElements[sourceRef].outgoing.push({ id: flow.id, target: targetRef, name: flowName });
@@ -219,22 +233,21 @@
             let botMessage = '';
             let nextElementId = null;
             let expectsUserInput = false;
-            let choices = []; // Para compuertas
+            let choices = []; // For gateways or tasks that require specific input
 
             switch (currentElement.type) {
                 case 'startEvent':
                     botMessage = `¡Hola! Soy un chatbot para el seguimiento de encomiendas internacionales. ¿Qué desea realizar?`;
-                    // Asumir que el evento de inicio tiene un flujo de salida a la primera tarea
                     nextElementId = currentElement.outgoing[0]?.target;
                     break;
 
                 case 'task':
-                case 'subProcess': // Tratar los subprocesos como tareas por ahora
+                case 'subProcess':
                     botMessage = `Estamos en el paso: "${currentElement.name}".`;
 
-                    // If a task requires user input, handle it here.
-                    // This section will need to be made dynamic if task names change often.
-                    // For now, it retains the logic for specific task names from the original.
+                    // This section retains original hardcoded task interactions for demonstration.
+                    // For a truly dynamic chatbot, you might need a more generic way to
+                    // infer what input a task expects, perhaps from task properties in BPMN XML.
                     if (currentElement.name === 'Qué quiere realizar el usuario?') {
                         botMessage += " Por favor, escriba 'seguimiento' para consultas de seguimiento, 'envio' para consultas de envío, o 'consulta' para una consulta general.";
                         expectsUserInput = true;
@@ -249,8 +262,7 @@
                     } else if (currentElement.name === 'Consulta') {
                         botMessage += " Por favor, describa su consulta general.";
                         expectsUserInput = true;
-                    }
-                    else {
+                    } else {
                         // For other tasks, simply proceed automatically
                         nextElementId = currentElement.outgoing[0]?.target;
                     }
@@ -259,16 +271,59 @@
                 case 'exclusiveGateway':
                     botMessage = `Estamos en una decisión en "${currentElement.name}".`;
                     expectsUserInput = true;
-                    // Get options from named outgoing transitions
                     choices = currentElement.outgoing.map(flow => flow.name.toLowerCase()).filter(name => name); 
 
                     if (choices.length > 0) {
                         botMessage += ` Por favor, elija: ${choices.join(' o ')}.`;
                     } else {
-                        // If there are no flow names, offer generic options
                         botMessage += " Por favor, escriba 'sí' o 'no' para continuar.";
                         choices = ['sí', 'no']; 
                     }
+                    break;
+
+                case 'parallelGateway':
+                    botMessage = `Hemos llegado a un punto de concurrencia en "${currentElement.name}". Las siguientes actividades están ocurriendo en paralelo: `;
+                    choices = currentElement.outgoing.map(flow => elements[flow.target]?.name || `Actividad ${flow.target}`);
+                    botMessage += choices.join(', ') + ". ";
+                    
+                    // For simplicity, we'll proceed with the first outgoing path.
+                    // A true parallel simulation is complex for a linear chatbot.
+                    nextElementId = currentElement.outgoing[0]?.target;
+                    if (currentElement.outgoing.length > 1) {
+                        botMessage += "Continuaré conversando sobre la primera actividad. Por favor, esté atento a las otras actividades en el diagrama.";
+                    }
+                    break;
+
+                case 'inclusiveGateway':
+                    botMessage = `Estamos en una decisión inclusiva en "${currentElement.name}". Puede elegir una o varias de las siguientes opciones: `;
+                    expectsUserInput = true;
+                    choices = currentElement.outgoing.map(flow => flow.name.toLowerCase()).filter(name => name);
+                    if (choices.length > 0) {
+                        botMessage += choices.join(' o ');
+                    } else {
+                        botMessage += "Por favor, escriba 'sí' o 'no' para continuar.";
+                        choices = ['sí', 'no'];
+                    }
+                    // For simplification, we'll still only process one path based on user input,
+                    // but the messaging acknowledges the inclusive nature.
+                    break;
+
+                case 'eventBasedGateway':
+                    botMessage = `Estamos esperando un evento en "${currentElement.name}". `;
+                    expectsUserInput = true;
+                    choices = currentElement.outgoing.map(flow => elements[flow.target]?.name || `Evento en ${flow.target}`);
+                    if (choices.length > 0) {
+                        botMessage += `Por favor, indique qué evento ha ocurrido: ${choices.join(' o ')}.`;
+                    } else {
+                        botMessage += "No se especificaron eventos. Por favor, intente con 'continuar'.";
+                        choices = ['continuar'];
+                    }
+                    break;
+
+                case 'intermediateCatchEvent':
+                    botMessage = `El chatbot está esperando el evento: "${currentElement.name}". Por favor, escriba 'listo' cuando el evento haya ocurrido.`;
+                    expectsUserInput = true;
+                    choices = ['listo']; // User explicitly acknowledges the event
                     break;
 
                 case 'intermediateThrowEvent':
@@ -313,11 +368,13 @@
 
             const userLower = userText.toLowerCase();
 
-            // Logic to determine the next step based on the current element and user input
-            // This section might still contain some hardcoded task names/IDs from the original diagram.
-            // For a truly dynamic chatbot for any BPMN, the interaction logic for tasks and gateways
-            // would need to be more generalized or driven by metadata within the BPMN itself.
+            let nextFlow = null;
+            const possibleFlows = currentElement.outgoing;
+
             if (currentElement.type === 'exclusiveGateway' ||
+                currentElement.type === 'inclusiveGateway' ||
+                currentElement.type === 'eventBasedGateway' ||
+                currentElement.type === 'intermediateCatchEvent' || // Handling explicit confirmation for catch events
                 currentElement.name === 'Qué quiere realizar el usuario?' ||
                 currentElement.name === 'Solicitud Documentación del usuario' ||
                 currentElement.name === 'Verificación de la documentación (¿Documentación completa?)' ||
@@ -325,14 +382,17 @@
                 currentElement.name === '¿Estado del envío completado?' ||
                 currentElement.name === 'Confirmación de identidad') {
 
-                let nextFlow = null;
-                const possibleFlows = currentElement.outgoing;
-
                 for (const flow of possibleFlows) {
                     const flowNameLower = flow.name.toLowerCase();
+                    const targetElementNameLower = elements[flow.target]?.name?.toLowerCase() || '';
 
-                    // Check if user input matches the flow name (condition)
-                    if (userLower.includes(flowNameLower)) {
+                    // Prioritize matching by flow name
+                    if (flowNameLower && userLower.includes(flowNameLower)) {
+                        nextFlow = flow;
+                        break;
+                    }
+                    // For Event-Based Gateways, match user input to the *name of the target event/task*
+                    if (currentElement.type === 'eventBasedGateway' && targetElementNameLower && userLower.includes(targetElementNameLower)) {
                         nextFlow = flow;
                         break;
                     }
@@ -346,6 +406,13 @@
                         nextFlow = flow;
                         break;
                     }
+
+                    // Handle 'listo' for intermediate catch events
+                    if (currentElement.type === 'intermediateCatchEvent' && userLower === 'listo') {
+                        nextFlow = flow; // Assume catch event proceeds along its only outgoing path
+                        break;
+                    }
+
 
                     // For "Qué quiere realizar el usuario?", map inputs to specific task names
                     if (currentElement.name === 'Qué quiere realizar el usuario?') {
@@ -380,8 +447,6 @@
                         if (userLower.includes('no')) {
                              addMessage('bot', "Documentación incompleta. Por favor, vuelva a enviar los documentos requeridos.");
                              // This 'Id_c72c6ce3-757a-4b93-a055-4cc2f27e1caf' is still a hardcoded ID
-                             // For full dynamism, you'd need a more generic way to identify "go back" paths
-                             // e.g., by looking at incoming flows from a previous task or a loop.
                              currentElement = elements['Id_c72c6ce3-757a-4b93-a055-4cc2f27e1caf']; // Return to the request task
                              userInput.disabled = false;
                              sendButton.disabled = false;
@@ -403,10 +468,17 @@
                         currentElement.name === 'Confirmación de identidad') {
                         possibleChoices = currentElement.outgoing.map(flow => flow.name.toLowerCase()).filter(name => name);
                         if (possibleChoices.length === 0) possibleChoices = ['sí', 'no']; // Generic fallback
+                    } else if (currentElement.type === 'inclusiveGateway') {
+                        possibleChoices = currentElement.outgoing.map(flow => flow.name.toLowerCase()).filter(name => name);
+                        if (possibleChoices.length === 0) possibleChoices = ['sí', 'no'];
+                    } else if (currentElement.type === 'eventBasedGateway') {
+                        possibleChoices = currentElement.outgoing.map(flow => elements[flow.target]?.name?.toLowerCase() || `Evento en ${flow.target}`);
                     } else if (currentElement.name === 'Qué quiere realizar el usuario?') {
                          possibleChoices = ['seguimiento', 'envio', 'consulta'];
                     } else if (currentElement.name === 'Solicitud Documentación del usuario') {
                         possibleChoices = ['sí', 'no'];
+                    } else if (currentElement.type === 'intermediateCatchEvent') {
+                        possibleChoices = ['listo'];
                     }
 
                     addMessage('bot', `No entendí su elección. Por favor, responda con una de las siguientes opciones: ${possibleChoices.join(', ')}.`);
@@ -518,7 +590,7 @@
             sendButton.disabled = true;
             startChatButton.disabled = false;
             currentElement = null;
-            // Clear highlighting when chat ends
+            // Limpiar el resaltado cuando termina el chat
             if (lastHighlightedElementId) {
                 viewer.get('canvas').removeMarker(lastHighlightedElementId, 'highlight');
                 lastHighlightedElementId = null;
@@ -526,7 +598,7 @@
             addMessage('bot', "Sesión de chat finalizada. Haga clic en 'Iniciar Chat' para comenzar una nueva conversación.");
         }
 
-        // Automatically load default BPMN diagram on page load if uncommented
+        // Cargar automáticamente el diagrama BPMN predeterminado al cargar la página si descomenta esto
         // document.addEventListener('DOMContentLoaded', () => {
         //     loadBpmnBtn.click();
         // });
