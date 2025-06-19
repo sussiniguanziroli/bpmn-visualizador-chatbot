@@ -16,13 +16,14 @@ El proyecto está estructurado en tres archivos principales:
 
 ## 🚀 Cómo Usar
 
-### 1. Guardar los Archivos
+### 1. Clonar el repositorio en su sistema
 
 1. Cree una carpeta local, por ejemplo: `bpmn-chatbot`.
-2. Guarde los archivos con los siguientes nombres dentro de esa carpeta:
-   - `index.html`
-   - `style.css`
-   - `script.js`
+2. Ejecute el comando:
+
+```
+git clone https://github.com/sussiniguanziroli/bpmn-visualizador-chatbot
+```
 
 ### 2. Abrir la Aplicación
 
